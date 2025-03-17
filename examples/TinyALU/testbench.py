@@ -38,10 +38,42 @@ class AluSeqItem(uvm_sequence_item):
         OP: {self.op.name} ({self.op.value}) B: 0x{self.B:02x}"
 
 
+class PrimeSeqItem(AluSeqItem):
+    def __init__(self, name, aa, bb, op):
+        super().__init__(name, aa, bb, op)
+        self.primes = [i for i in range(0, 256) if self.is_prime(i)]
+
+    def randomize_operands(self):
+        self.A = random.choice(self.primes)
+        self.B = random.choice(self.primes)
+
+    def is_prime(self, x):
+        if x < 2:
+            return False
+        if x == 2:
+            return True
+        if x % 2 == 0:
+            return False
+        
+        for i in range(3, int(x**0.5) + 1, 2):
+            if x % i == 0:
+                return False
+        return True
+
+
+class PrimeSeq(uvm_sequence):
+    async def body(self):
+        for op in list(Ops):
+            cmd_tr = PrimeSeqItem("cmd_tr", None, None, op)
+            await self.start_item(cmd_tr)
+            cmd_tr.randomize_operands()
+            await self.finish_item(cmd_tr)
+
+
 class RandomSeq(uvm_sequence):
     async def body(self):
         for op in list(Ops):
-            cmd_tr = AluSeqItem("cmd_tr", None, None, op)
+            cmd_tr = AluSeqItem("prime_tr", None, None, op)
             await self.start_item(cmd_tr)
             cmd_tr.randomize_operands()
             await self.finish_item(cmd_tr)
@@ -61,8 +93,10 @@ class TestAllSeq(uvm_sequence):
         seqr = ConfigDB().get(None, "", "SEQR")
         random = RandomSeq("random")
         max = MaxSeq("max")
+        prime = PrimeSeq("prime")
         await random.start(seqr)
         await max.start(seqr)
+        await prime.start(seqr)
 
 
 class TestAllForkSeq(uvm_sequence):
@@ -71,9 +105,11 @@ class TestAllForkSeq(uvm_sequence):
         seqr = ConfigDB().get(None, "", "SEQR")
         random = RandomSeq("random")
         max = MaxSeq("max")
+        prime = PrimeSeq("prime")
         random_task = cocotb.start_soon(random.start(seqr))
         max_task = cocotb.start_soon(max.start(seqr))
-        await Combine(random_task, max_task)
+        prime_task = cocotb.start_soon(prime.start(seqr))
+        await Combine(random_task, max_task, prime_task)
 
 # Sequence library example
 
@@ -271,7 +307,6 @@ class AluTest(uvm_test):
         await self.test_all.start()
         self.drop_objection()
 
-
 @pyuvm.test()
 class ParallelTest(AluTest):
     """Test ALU random and max forked"""
@@ -297,3 +332,11 @@ class AluTestErrors(AluTest):
 
     def start_of_simulation_phase(self):
         ConfigDB().set(None, "*", "CREATE_ERRORS", True)
+
+
+@pyuvm.test()
+class PrimeTest(AluTest):
+
+    def build_phase(self):
+        uvm_factory().set_type_override_by_type(TestAllSeq, PrimeSeq)
+        super().build_phase()
